@@ -148,6 +148,22 @@ def assembler_script(blocs, jour):
 
 
 # ------------------------------------------------------------ 4. Messages Telegram
+PRONONCIATION = {
+    "OTAN": "Otan", "EMIA": "É-M-I-A", "UE": "U-E", "PIB": "P-I-B",
+    "ONU": "Onu", "FAMAS": "Famas", "n°": "numéro",
+}
+
+
+def preparer_voix(texte):
+    """Nettoie le script pour la synthèse vocale (le fichier script.txt reste inchangé)."""
+    for k, v in PRONONCIATION.items():
+        texte = re.sub(r"(?<!\w)%s(?!\w)" % re.escape(k), v, texte)
+    texte = texte.replace("M€", " millions d'euros").replace("Md€", " milliards d'euros")
+    texte = texte.replace("€", " euros").replace("%", " pour cent")
+    texte = re.sub(r"\([^)]*\)", "", texte)               # parenthèses
+    texte = re.sub(r"(\d)[\s\u00a0\u202f](\d{3})\b", r"\1\2", texte)  # 1 200 -> 1200
+    texte = texte.replace("…", ",").replace(" - ", ", ")
+    return re.sub(r"[ \t]{2,}", " ", texte)
 def resume(blocs, jour, minutes):
     lignes = [f"🎧 {lib.date_fr(jour)} — {minutes} min", ""]
     for i, b in enumerate(blocs, 1):
@@ -195,7 +211,7 @@ def main():
     print(f"    script : {len(script.split())} mots")
 
     print("4/5 Voix")
-    mp3, secondes = lib.texte_vers_mp3(script, "/tmp/podcast.mp3")
+    mp3, secondes = lib.texte_vers_mp3(preparer_voix(script), "/tmp/podcast.mp3")
     minutes = round(secondes / 60)
     with open("/tmp/script.txt", "w", encoding="utf-8") as f:
         f.write(script)
