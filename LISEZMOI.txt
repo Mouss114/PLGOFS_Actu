@@ -1,0 +1,8 @@
+Podcast quotidien pour le grand oral : fichiers du projet.
+Suis le guide d'installation pas à pas : il explique où mettre chaque fichier.
+
+  requirements.txt, config.py, lib.py, memory.py, main.py   -> Phase 1 (podcast du matin)
+  test_sources.py                                           -> Phase 1 (test des sources)
+  ingest.py, supabase/schema.sql                            -> Phase 2 (mémoire)
+  supabase/index.ts, docs/index.html                        -> Phase 2 (fonction + site)
+  weekly.py                                                 -> Phase 3 (récap du dimanche)

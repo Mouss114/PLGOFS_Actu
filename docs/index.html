@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Grand oral — fiches</title>
+<style>
+  :root { --bg:#10141c; --card:#1a2030; --txt:#e8ecf4; --mut:#93a0b8; --acc:#5b9dff; --ok:#3ecf8e; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:16px/1.5 system-ui,sans-serif; background:var(--bg); color:var(--txt); }
+  header { position:sticky; top:0; background:var(--bg); padding:10px 12px; border-bottom:1px solid #2a3248; z-index:2; }
+  h1 { font-size:18px; margin:0 0 8px; }
+  nav { display:flex; gap:6px; overflow-x:auto; }
+  nav button, .btn { background:var(--card); color:var(--txt); border:1px solid #2a3248; border-radius:8px; padding:8px 12px; font:inherit; cursor:pointer; white-space:nowrap; }
+  nav button.on { background:var(--acc); border-color:var(--acc); color:#fff; }
+  main { padding:12px; max-width:820px; margin:auto; }
+  input { width:100%; padding:12px; border-radius:8px; border:1px solid #2a3248; background:var(--card); color:var(--txt); font:inherit; }
+  .row { display:flex; gap:8px; margin:8px 0 14px; }
+  .row .btn { flex:1; }
+  .fiche, .carte, .item { background:var(--card); border-radius:10px; padding:12px 14px; margin:10px 0; }
+  h2 { font-size:20px; margin:0 0 6px; } h3 { font-size:13px; letter-spacing:.06em; text-transform:uppercase; color:var(--acc); margin:16px 0 4px; }
+  ul { margin:4px 0; padding-left:20px; } li { margin:3px 0; } a { color:var(--acc); }
+  .mut { color:var(--mut); font-size:14px; }
+  .grille { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; }
+  .case { border-radius:10px; padding:12px; cursor:pointer; border:1px solid #2a3248; }
+  .case b { font-size:22px; display:block; }
+  .faible { border-color:#e5484d; }
+  [hidden] { display:none !important; }
+  @media print { body { background:#fff; color:#000; } header, .noprint, .row, input { display:none !important; } .fiche, .item { background:#fff; border:1px solid #ccc; } h3 { color:#333; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎖️ Grand oral</h1>
+  <nav id="onglets"></nav>
+</header>
+<main>
+  <section id="recherche">
+    <input id="q" placeholder="Un mot-clé ou une question (ex. drones, taux BCE…)" autocomplete="off">
+    <div class="row">
+      <button class="btn" id="bp">🎧 Podcasts</button>
+      <button class="btn" id="bs">🔎 Sources</button>
+    </div>
+    <div id="resultat"></div>
+  </section>
+  <section id="podcasts" hidden></section>
+  <section id="carte" hidden></section>
+  <section id="glossaire" hidden><input id="fg" placeholder="Filtrer les termes…"><div id="lg"></div></section>
+  <section id="refs" hidden><input id="fr" placeholder="Chercher dans la RNS 2025 / LPM 2024-2030…"><div id="lr"></div></section>
+</main>
+<script>
+const API = "COLLE_ICI_L_ADRESSE_DE_TA_FONCTION";
+// Doit être identique à DOMAINES dans config.py
+const DOMAINES = ["Économie & marchés","Politique monétaire","Fiscalité & budget","Entreprises","Géopolitique","Armées & opérations","BITD & innovation","Droit & éthique","Institutions"];
+const SECTIONS = [["sujet","Le sujet"],["definition","Définition & cadre"],["situation","Situation actuelle"],["contexte_strategique","Contexte stratégique"],["acteurs","Acteurs"],["enjeux","Les enjeux"],["chiffres","Chiffres clés"],["debat","Points de débat"],["a_retenir","À retenir"],["questions_liees","Questions liées"]];
+const ONGLETS = [["recherche","🔍 Recherche"],["podcasts","🎧 Derniers podcasts"],["carte","🗺️ Compétences"],["glossaire","📖 Glossaire"],["refs","📚 Références"]];
+const $ = (s) => document.querySelector(s);
+function h(tag, props, ...kids) { const e = document.createElement(tag); Object.assign(e, props || {}); kids.flat().forEach((k) => e.append(k)); return e; }
+function vide(e) { while (e.firstChild) e.removeChild(e.firstChild); return e; }
+
+async function call(action, data) {
+  let code = ""; try { code = localStorage.getItem("code") || ""; } catch (e) {}
+  if (!code) { code = prompt("Code d'accès :") || ""; if (!code) throw new Error("Code requis"); }
+  const r = await fetch(API, { method: "POST", headers: { "Content-Type": "application/json", "x-site-code": code }, body: JSON.stringify({ action, ...(data || {}) }) });
+  const j = await r.json();
+  if (r.status === 401) { try { localStorage.removeItem("code"); } catch (e) {} throw new Error("Code d'accès incorrect : réessaie."); }
+  if (j && j.error) throw new Error(j.error);
+  try { localStorage.setItem("code", code); } catch (e) {}
+  return j;
+}
+function erreur(zone, e) { vide(zone).append(h("p", { className: "mut", textContent: "⚠️ " + e.message })); }
+
+function onglet(id) {
+  ONGLETS.forEach(([k]) => { $("#" + k).hidden = k !== id; });
+  document.querySelectorAll("#onglets button").forEach((b) => b.classList.toggle("on", b.dataset.id === id));
+  if (id === "podcasts") chargerPodcasts();
+  if (id === "carte") chargerCarte();
+  if (id === "glossaire") chargerGlossaire();
+}
+ONGLETS.forEach(([k, t]) => $("#onglets").append(h("button", { textContent: t, onclick: () => onglet(k) })));
+document.querySelectorAll("#onglets button").forEach((b, i) => { b.dataset.id = ONGLETS[i][0]; });
+
+// ---------- Fiches
+function ficheHtml(f) {
+  const box = h("article", { className: "fiche" }, h("h2", { textContent: f.titre || "Fiche" }));
+  for (const [k, t] of SECTIONS) {
+    const v = f[k]; if (!v || (Array.isArray(v) && !v.length)) continue;
+    box.append(h("h3", { textContent: t }));
+    if (Array.isArray(v)) {
+      const ul = h("ul");
+      for (const x of v) {
+        const li = h("li");
+        if (k === "questions_liees") li.append(h("a", { href: "#", textContent: String(x), onclick: (ev) => { ev.preventDefault(); chercher(String(x), "podcasts"); } }));
+        else li.textContent = String(x);
+        ul.append(li);
+      }
+      box.append(ul);
+    } else box.append(h("p", { textContent: String(v) }));
+  }
+  if (f.liens && f.liens.length) {
+    box.append(h("h3", { textContent: "Sources" }));
+    box.append(h("ul", {}, f.liens.map((l) => h("li", {}, h("a", { href: /^https?:/.test(l.link) ? l.link : "#", target: "_blank", rel: "noopener", textContent: l.source + " — " + l.title })))));
+  }
+  box.append(h("button", { className: "btn noprint", textContent: "📄 Exporter en PDF", onclick: () => window.print() }));
+  return box;
+}
+async function chercher(q, mode) {
+  q = (q || "").trim(); if (!q) return;
+  onglet("recherche"); $("#q").value = q;
+  const zone = vide($("#resultat")); zone.append(h("p", { className: "mut", textContent: "Je prépare la fiche…" }));
+  try { vide(zone).append(ficheHtml(await call("fiche", { q, mode }))); } catch (e) { erreur(zone, e); }
+}
+$("#bp").onclick = () => chercher($("#q").value, "podcasts");
+$("#bs").onclick = () => chercher($("#q").value, "sources");
+$("#q").addEventListener("keydown", (e) => { if (e.key === "Enter") chercher($("#q").value, "podcasts"); });
+
+// ---------- Derniers podcasts
+async function chargerPodcasts() {
+  const zone = vide($("#podcasts")); zone.append(h("p", { className: "mut", textContent: "Chargement…" }));
+  try {
+    const lignes = await call("podcasts"), jours = {};
+    lignes.forEach((l) => { (jours[l.date] = jours[l.date] || []).push(l); });
+    vide(zone);
+    if (!lignes.length) zone.append(h("p", { className: "mut", textContent: "Aucun podcast en mémoire pour l'instant." }));
+    Object.keys(jours).forEach((jour) => {
+      zone.append(h("h3", { textContent: new Date(jour).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }) }));
+      jours[jour].forEach((l) => {
+        const detail = h("div", { hidden: true });
+        const item = h("div", { className: "item" }, h("b", { textContent: (l.approfondi ? "⭐ " : "") + l.nom }), h("div", { className: "mut", textContent: l.a_retenir || "" }), detail);
+        item.style.cursor = "pointer";
+        item.onclick = async () => {
+          if (!detail.hidden) { detail.hidden = true; return; }
+          if (!detail.firstChild) {
+            try {
+              const s = await call("sujet", { id: l.id });
+              detail.append(h("p", { textContent: s.texte }));
+              if (s.chiffres && s.chiffres.length) detail.append(h("ul", {}, s.chiffres.map((c) => h("li", { textContent: String(c) }))));
+              if (s.jury && s.jury.question) detail.append(h("p", { textContent: "❓ " + s.jury.question + " → " + (s.jury.reponse || "") }));
+            } catch (e) { detail.append(h("p", { textContent: "⚠️ " + e.message })); }
+          }
+          detail.hidden = false;
+        };
+        zone.append(item);
+      });
+    });
+  } catch (e) { erreur(zone, e); }
+}
+
+// ---------- Carte de compétences
+async function chargerCarte() {
+  const zone = vide($("#carte")); zone.append(h("p", { className: "mut", textContent: "Chargement…" }));
+  try {
+    const lignes = await call("carte"), n = {};
+    lignes.forEach((l) => { n[l.domaine] = (n[l.domaine] || 0) + 1; });
+    const max = Math.max(1, ...Object.values(n));
+    vide(zone).append(h("p", { className: "mut", textContent: "Plus la case est foncée, plus tu as travaillé le thème. Bordure rouge = zone à creuser." }));
+    const grille = h("div", { className: "grille" });
+    DOMAINES.concat(Object.keys(n).filter((d) => d && !DOMAINES.includes(d))).forEach((d) => {
+      const c = n[d] || 0, case_ = h("div", { className: "case" + (c < 3 ? " faible" : "") }, h("b", { textContent: String(c) }), d);
+      case_.style.background = "rgba(91,157,255," + (0.08 + 0.5 * c / max).toFixed(2) + ")";
+      case_.onclick = () => chercher(d, "podcasts");
+      grille.append(case_);
+    });
+    zone.append(grille);
+  } catch (e) { erreur(zone, e); }
+}
+
+// ---------- Glossaire
+let GLOSSAIRE = null;
+function afficherGlossaire() {
+  const f = $("#fg").value.toLowerCase(), zone = vide($("#lg"));
+  (GLOSSAIRE || []).filter((t) => !f || t.terme.includes(f) || (t.definition || "").toLowerCase().includes(f))
+    .forEach((t) => zone.append(h("div", { className: "item" }, h("b", { textContent: t.terme }), h("div", { textContent: t.definition || "" }))));
+}
+async function chargerGlossaire() {
+  if (!GLOSSAIRE) { try { GLOSSAIRE = await call("glossaire"); } catch (e) { return erreur($("#lg"), e); } }
+  afficherGlossaire();
+}
+$("#fg").addEventListener("input", afficherGlossaire);
+
+// ---------- Références (RNS / LPM)
+$("#fr").addEventListener("keydown", async (e) => {
+  if (e.key !== "Enter") return;
+  const zone = vide($("#lr"));
+  try {
+    const lignes = await call("docs", { q: $("#fr").value });
+    if (!lignes.length) zone.append(h("p", { className: "mut", textContent: "Aucun passage trouvé." }));
+    lignes.forEach((l) => zone.append(h("div", { className: "item" }, h("div", { className: "mut", textContent: l.doc + " — page " + l.page }), h("div", { textContent: l.content }))));
+  } catch (err) { erreur(zone, err); }
+});
+
+onglet("recherche");
+</script>
+</body>
+</html>
