@@ -1,0 +1,31 @@
+name: Outils
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Que faire ?'
+        type: choice
+        options:
+          - tester-sources
+          - charger-documents
+
+jobs:
+  outils:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Tester les sources
+        if: inputs.action == 'tester-sources'
+        run: python test_sources.py
+      - name: Charger les documents (RNS, LPM)
+        if: inputs.action == 'charger-documents'
+        run: python ingest.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
