@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """Outils communs : IA (Groq), voix, Telegram."""
-import asyncio, datetime as dt, json, os, re, time
+import asyncio, datetime as dt, json, os, re, subprocess, tempfile, time
 from zoneinfo import ZoneInfo
 import requests
+import edge_tts
 import config
 
 JOURS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
@@ -74,6 +75,9 @@ def groq_chat(prompt, system="", max_tokens=1500, json_mode=False, temperature=0
 
 
 # ---------------------------------------------------------------- Voix
+VITESSE = "-5%"
+
+
 def decouper(texte, taille=2500):
     morceaux, courant = [], ""
     for phrase in re.split(r"(?<=[.!?…])\s+", texte):
@@ -87,43 +91,78 @@ def decouper(texte, taille=2500):
 
 
 async def _edge(texte, voix, chemin):
-    import edge_tts
-    await edge_tts.Communicate(texte, voix).save(chemin)
+    await edge_tts.Communicate(texte, voix, rate=VITESSE).save(chemin)
+
+
+def _silence(chemin, secondes):
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono", "-t", str(secondes),
+                    "-c:a", "libmp3lame", "-b:a", "48k", chemin], check=True, capture_output=True)
 
 
 def texte_vers_mp3(texte, sortie):
-    """Texte -> MP3. Essaie edge-tts (voix naturelle), puis gTTS (secours). Retourne (chemin, secondes)."""
-    morceaux = decouper(texte)
-    fichiers, moteur = [], "edge-tts"
-    try:
-        for i, m in enumerate(morceaux):
-            f = f"/tmp/seg_{i}.mp3"
-            for essai in range(3):
-                try:
-                    asyncio.run(_edge(m, config.VOIX, f))
-                    if os.path.getsize(f) > 1000:
-                        break
-                except Exception as e:
-                    print(f"  edge-tts essai {essai + 1} : {e}")
-                    time.sleep(4)
-            else:
-                raise RuntimeError("edge-tts n'a pas répondu")
-            fichiers.append(f)
-    except Exception as e:
-        print(f"  edge-tts indisponible ({e}) -> voix de secours gTTS")
-        from gtts import gTTS
-        moteur, fichiers = "gtts", []
-        for i, m in enumerate(morceaux):
-            f = f"/tmp/gseg_{i}.mp3"
-            gTTS(m, lang="fr").save(f)
-            fichiers.append(f)
-    with open(sortie, "wb") as out:
-        for f in fichiers:
-            with open(f, "rb") as src:
-                out.write(src.read())
-    taille = os.path.getsize(sortie)
-    secondes = taille * 8 / 48000 if moteur == "edge-tts" else len(texte.split()) / 150 * 60
-    print(f"  audio ({moteur}) : {secondes / 60:.1f} min, {taille / 1e6:.1f} Mo")
+    """Texte -> MP3 avec pauses et volume normalisé. edge-tts, puis gTTS en secours. Retourne (chemin, secondes)."""
+    # liste de (morceau de texte, pause après lui en secondes)
+    morceaux = []
+    for bloc in [b for b in texte.split("\n\n") if b.strip()]:
+        lignes = [l.strip() for l in bloc.split("\n") if l.strip()]
+        for li, ligne in enumerate(lignes):
+            parts = decouper(ligne)
+            for pi, p in enumerate(parts):
+                if pi < len(parts) - 1:
+                    pause = 0.2
+                elif li < len(lignes) - 1:
+                    pause = 0.45
+                else:
+                    pause = 1.0
+                morceaux.append((p, pause))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        silences = {}
+        for p in {pause for _, pause in morceaux}:
+            silences[p] = f"{tmp}/sil_{p}.mp3"
+            _silence(silences[p], p)
+
+        def synth(moteur):
+            fichiers = []
+            for i, (m, pause) in enumerate(morceaux):
+                f = f"{tmp}/seg_{i}.mp3"
+                if moteur == "edge-tts":
+                    for essai in range(3):
+                        try:
+                            asyncio.run(_edge(m, config.VOIX, f))
+                            if os.path.getsize(f) > 1000:
+                                break
+                        except Exception as e:
+                            print(f"  edge-tts essai {essai + 1} : {e}")
+                            time.sleep(4)
+                    else:
+                        raise RuntimeError("edge-tts n'a pas répondu")
+                else:
+                    from gtts import gTTS
+                    gTTS(m, lang="fr").save(f)
+                fichiers += [f, silences[pause]]
+            return fichiers
+
+        moteur = "edge-tts"
+        try:
+            fichiers = synth("edge-tts")
+        except Exception as e:
+            print(f"  edge-tts indisponible ({e}) -> voix de secours gTTS")
+            moteur = "gtts"
+            fichiers = synth("gtts")
+
+        liste = f"{tmp}/liste.txt"
+        with open(liste, "w") as fh:
+            fh.write("\n".join(f"file '{f}'" for f in fichiers))
+        subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", liste,
+                        "-af", "loudnorm=I=-16:TP=-1.5:LRA=11", "-ar", "44100", "-b:a", "96k", sortie],
+                       check=True, capture_output=True)
+
+    duree = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                            "-of", "default=nw=1:nk=1", sortie],
+                           capture_output=True, text=True, check=True).stdout
+    secondes = float(duree.strip())
+    print(f"  audio ({moteur}) : {secondes / 60:.1f} min, {os.path.getsize(sortie) / 1e6:.1f} Mo")
     return sortie, secondes
 
 
