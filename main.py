@@ -154,16 +154,23 @@ PRONONCIATION = {
 }
 
 
+def _nombre_compact(m):
+    return re.sub(r"[\s\u00a0\u202f]", "", m.group(0))
+
+
 def preparer_voix(texte):
     """Nettoie le script pour la synthèse vocale (le fichier script.txt reste inchangé)."""
+    texte = texte.replace(" … Réponse possible", "\n\nRéponse possible")  # pause avant la réponse
     for k, v in PRONONCIATION.items():
         texte = re.sub(r"(?<!\w)%s(?!\w)" % re.escape(k), v, texte)
     texte = texte.replace("M€", " millions d'euros").replace("Md€", " milliards d'euros")
     texte = texte.replace("€", " euros").replace("%", " pour cent")
-    texte = re.sub(r"\([^)]*\)", "", texte)               # parenthèses
-    texte = re.sub(r"(\d)[\s\u00a0\u202f](\d{3})\b", r"\1\2", texte)  # 1 200 -> 1200
+    texte = re.sub(r"\([^)]*\)", "", texte)  # parenthèses
+    texte = re.sub(r"(?<!\d)\d{1,3}(?:[\s\u00a0\u202f]\d{3})+(?!\d)", _nombre_compact, texte)  # 1 200 000 -> 1200000
     texte = texte.replace("…", ",").replace(" - ", ", ")
     return re.sub(r"[ \t]{2,}", " ", texte)
+
+
 def resume(blocs, jour, minutes):
     lignes = [f"🎧 {lib.date_fr(jour)} — {minutes} min", ""]
     for i, b in enumerate(blocs, 1):
