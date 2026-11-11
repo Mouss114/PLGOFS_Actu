@@ -47,7 +47,7 @@ MAX_ARTICLES = 60        # nombre max de titres envoyés à l'IA (réduit pour t
 PAUSE = 20               # secondes entre deux appels IA (limite gratuite de Groq)
 
 # ---- Voix ----
-VOIX = "fr-FR-HenriNeural"  # autres : fr-FR-HenriNeural, fr-FR-DeniseNeural, fr-FR-RemyMultilingualNeural
+VOIX = "fr-FR-RemyMultilingualNeural"  # autres : fr-FR-HenriNeural, fr-FR-DeniseNeural, fr-FR-RemyMultilingualNeural
 
 # ---- IA (Groq) ----
 # llama-3.3-70b-versatile et llama-3.1-8b-instant sont arrêtés depuis le 16/08/2026
