@@ -75,7 +75,8 @@ def groq_chat(prompt, system="", max_tokens=1500, json_mode=False, temperature=0
 
 
 # ---------------------------------------------------------------- Voix
-VITESSE = "-5%"
+ATEMPO = 1.08  # vitesse de lecture appliquée par ffmpeg (1.0 = normal, 1.15 = plus rapide)
+VOIX_SECOURS = "fr-FR-HenriNeural"  # autre voix masculine, essayée si config.VOIX échoue
 
 
 def decouper(texte, taille=2500):
@@ -91,12 +92,26 @@ def decouper(texte, taille=2500):
 
 
 async def _edge(texte, voix, chemin):
-    await edge_tts.Communicate(texte, voix, rate=VITESSE).save(chemin)
+    await edge_tts.Communicate(texte, voix).save(chemin)
 
 
 def _silence(chemin, secondes):
     subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono", "-t", str(secondes),
                     "-c:a", "libmp3lame", "-b:a", "48k", chemin], check=True, capture_output=True)
+
+
+def _edge_segment(texte, chemin, candidates):
+    """Essaie chaque voix (2 essais chacune). Retourne la voix qui a fonctionné."""
+    for voix in candidates:
+        for essai in range(2):
+            try:
+                asyncio.run(_edge(texte, voix, chemin))
+                if os.path.getsize(chemin) > 1000:
+                    return voix
+            except Exception as e:
+                print(f"  edge-tts ({voix}) essai {essai + 1} : {e}")
+                time.sleep(3)
+    raise RuntimeError("edge-tts n'a pas répondu")
 
 
 def texte_vers_mp3(texte, sortie):
@@ -109,11 +124,11 @@ def texte_vers_mp3(texte, sortie):
             parts = decouper(ligne)
             for pi, p in enumerate(parts):
                 if pi < len(parts) - 1:
-                    pause = 0.2
+                    pause = 0.1
                 elif li < len(lignes) - 1:
-                    pause = 0.45
+                    pause = 0.3
                 else:
-                    pause = 1.0
+                    pause = 0.8
                 morceaux.append((p, pause))
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -122,21 +137,15 @@ def texte_vers_mp3(texte, sortie):
             silences[p] = f"{tmp}/sil_{p}.mp3"
             _silence(silences[p], p)
 
+        voix_ok = [None]
+
         def synth(moteur):
             fichiers = []
             for i, (m, pause) in enumerate(morceaux):
                 f = f"{tmp}/seg_{i}.mp3"
                 if moteur == "edge-tts":
-                    for essai in range(3):
-                        try:
-                            asyncio.run(_edge(m, config.VOIX, f))
-                            if os.path.getsize(f) > 1000:
-                                break
-                        except Exception as e:
-                            print(f"  edge-tts essai {essai + 1} : {e}")
-                            time.sleep(4)
-                    else:
-                        raise RuntimeError("edge-tts n'a pas répondu")
+                    candidates = [voix_ok[0]] if voix_ok[0] else list(dict.fromkeys([config.VOIX, VOIX_SECOURS]))
+                    voix_ok[0] = _edge_segment(m, f, candidates)
                 else:
                     from gtts import gTTS
                     gTTS(m, lang="fr").save(f)
@@ -146,16 +155,22 @@ def texte_vers_mp3(texte, sortie):
         moteur = "edge-tts"
         try:
             fichiers = synth("edge-tts")
+            moteur = f"edge-tts, {voix_ok[0]}"
         except Exception as e:
             print(f"  edge-tts indisponible ({e}) -> voix de secours gTTS")
             moteur = "gtts"
+            try:
+                prevenir("⚠️ Voix de secours gTTS utilisée aujourd'hui (edge-tts indisponible).")
+            except Exception:
+                pass
             fichiers = synth("gtts")
 
         liste = f"{tmp}/liste.txt"
         with open(liste, "w") as fh:
             fh.write("\n".join(f"file '{f}'" for f in fichiers))
         subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", liste,
-                        "-af", "loudnorm=I=-16:TP=-1.5:LRA=11", "-ar", "44100", "-b:a", "96k", sortie],
+                        "-af", f"atempo={ATEMPO},loudnorm=I=-16:TP=-1.5:LRA=11",
+                        "-ar", "44100", "-b:a", "96k", sortie],
                        check=True, capture_output=True)
 
     duree = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
