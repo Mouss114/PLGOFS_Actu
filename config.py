@@ -2,7 +2,9 @@
 """Réglages du podcast : c'est (presque) le seul fichier que tu as à modifier."""
 
 # ---- Sources : ("nom", "adresse du flux RSS")  ou  ("nom", "google:nom-de-domaine.fr") ----
-# "google:" = pas de flux RSS fiable : on lit les titres via Google Actualités (sans résumé).
+# "google:" = pas de flux RSS fiable : on trouve les liens via Google Actualités.
+# Le script doit ensuite OUVRIR chaque lien et lire l'article (voir LIRE_ARTICLES_COMPLETS plus bas).
+# Retirés après le test du 11/11/2026 : Meta-defense (410 Gone, flux supprimé) et Reuters (0 article).
 SOURCES = [
     # Économie / finance
     ("Le Monde Économie", "https://www.lemonde.fr/economie/rss_full.xml"),
@@ -11,11 +13,11 @@ SOURCES = [
     ("La Tribune", "google:latribune.fr"),
     ("Boursorama", "google:boursorama.com"),
     ("Bloomberg", "https://feeds.bloomberg.com/markets/news.rss"),
-    ("Reuters", "google:reuters.com"),
     # Institutions
     ("BCE", "https://www.ecb.europa.eu/rss/press.xml"),
+    ("Federal Reserve", "https://www.federalreserve.gov/feeds/press_all.xml"),
     ("Banque de France", "google:banque-france.fr"),
-    ("AMF", "google:amf-france.org"),
+    ("AMF", "https://www.amf-france.org/fr/flux-rss/display/25"),
     # Politique / géopolitique
     ("Le Monde International", "https://www.lemonde.fr/international/rss_full.xml"),
     ("France 24", "https://www.france24.com/fr/rss"),
@@ -26,7 +28,6 @@ SOURCES = [
     ("Ministère des Armées", "google:defense.gouv.fr"),
     ("Opex360", "https://www.opex360.com/feed/"),
     ("Forces Operations Blog", "https://www.forcesoperations.com/feed/"),
-    ("Meta-defense", "https://meta-defense.fr/feed/"),
     ("Air & Cosmos", "google:air-cosmos.com"),
     ("Mer et Marine", "google:meretmarine.com"),
     ("Defense News", "https://www.defensenews.com/arc/outboundfeeds/rss/?outputType=xml"),
@@ -37,20 +38,30 @@ SOURCES = [
     ("CICR", "google:icrc.org"),
 ]
 
+# ---- Lecture des articles (le script doit utiliser ces valeurs) ----
+LIRE_ARTICLES_COMPLETS = True   # ouvrir chaque lien et extraire le texte, pas seulement le titre
+ARTICLES_PAR_SUJET = 4          # nombre d'articles lus en entier pour chaque sujet retenu
+MAX_CARACTERES_ARTICLE = 6000   # texte conservé par article (évite de dépasser la limite de tokens)
+TIMEOUT_HTTP = 20               # secondes avant d'abandonner un flux ou un article
+IGNORER_SOURCE_EN_PANNE = True  # une source qui échoue ne doit jamais bloquer le podcast
+MIN_SOURCES_OK = 3              # en dessous, le script s'arrête avec un message clair
+
 # ---- Format ----
 NB_SUJETS = 5            # nombre de sujets par podcast
 MOTS_SUJET = 450         # longueur d'un sujet normal (en mots)
 MOTS_APPROFONDI = 800    # longueur du sujet du jour
 FENETRE_HEURES = 48      # on ne garde que les articles des 48 dernières heures
-MAX_ARTICLES = 100       # nombre max de titres envoyés à l'IA
+MAX_ARTICLES = 60        # nombre max de titres envoyés à l'IA (réduit pour tenir dans les limites gratuites)
 PAUSE = 20               # secondes entre deux appels IA (limite gratuite de Groq)
 
 # ---- Voix ----
 VOIX = "fr-FR-VivienneMultilingualNeural"  # autres : fr-FR-HenriNeural, fr-FR-DeniseNeural, fr-FR-RemyMultilingualNeural
 
 # ---- IA (Groq) ----
-MODELE_PRINCIPAL = "llama-3.3-70b-versatile"
-MODELE_SECOURS = "llama-3.1-8b-instant"
+# llama-3.3-70b-versatile et llama-3.1-8b-instant sont arrêtés depuis le 16/08/2026
+# pour les comptes gratuits : ils sont remplacés par les modèles recommandés par Groq.
+MODELE_PRINCIPAL = "openai/gpt-oss-120b"
+MODELE_SECOURS = "openai/gpt-oss-20b"
 
 DOMAINES = ["Économie & marchés", "Politique monétaire", "Fiscalité & budget", "Entreprises",
             "Géopolitique", "Armées & opérations", "BITD & innovation", "Droit & éthique", "Institutions"]
@@ -59,15 +70,19 @@ TRANSITIONS = ["certes", "cependant", "néanmoins", "surtout", "en définitive",
                "en revanche", "de surcroît", "en l'occurrence", "en d'autres termes", "il convient de noter", "par ailleurs"]
 
 # Mots qui rendent un article pertinent (en minuscules). Ajoute les tiens.
+# "ia" et "cac" ont été retirés/remplacés : ils correspondaient à une multitude de mots sans rapport.
 MOTS_CLES = [
     "bce", "banque centrale", "taux", "inflation", "croissance", "pib", "budget", "dette", "déficit", "fiscal", "impôt",
-    "obligation", "bourse", "cac", "euro", "dollar", "banque", "crédit", "assurance", "fusion", "acquisition", "opa",
+    "obligation", "bourse", "cac 40", "euro", "dollar", "banque", "crédit", "assurance", "fusion", "acquisition", "opa",
     "faillite", "résultats", "finance", "marché", "investissement", "régulation", "amf", "bâle", "solvabilité",
     "défense", "armée", "militaire", "otan", "ukraine", "russie", "chine", "taïwan", "israël", "gaza", "iran",
     "géopolit", "sanction", "guerre", "conflit", "missile", "drone", "munition", "nucléaire", "dissuasion", "cyber",
-    "espace", "satellite", "ia", "intelligence artificielle", "industrie", "armement", "dassault", "thales", "airbus",
+    "espace", "satellite", "intelligence artificielle", "industrie", "armement", "dassault", "thales", "airbus",
     "naval", "rafale", "lpm", "rns", "union européenne", "commission européenne", "traité", "onu", "droit international",
     "genève", "cicr", "humanitaire", "éthique", "sahel", "afrique", "pétrole", "énergie", "commerce", "douane", "tarif",
+    # Sources anglophones (Fed, Defense News, War on the Rocks)
+    "central bank", "federal reserve", "interest rate", "inflation", "tariff", "sanctions", "defense", "defence",
+    "military", "nato", "ceasefire", "missile", "navy", "air force", "procurement", "budget", "bond", "treasury",
 ]
 
 PERIMETRE = """- marchés financiers, politique monétaire (BCE, Fed, Banque de France), régulation bancaire et financière (AMF, Bâle), fiscalité des investisseurs, entreprises (résultats, fusions, faillites), macroéconomie ;
