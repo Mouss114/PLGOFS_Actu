@@ -28,18 +28,43 @@ const rpc = (fn: string, args: Record<string, unknown>) => sb(`rpc/${fn}`, { met
 
 // ---------- IA (Groq)
 async function llm(prompt: string, jsonMode = false, max = 1800): Promise<string> {
-  for (const model of ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]) {
+  if (!GROQ) throw new Error("La clé GROQ_API_KEY est absente des Secrets Supabase.");
+  const erreurs: string[] = [];
+  const candidats = ["openai/gpt-oss-120b", "openai/gpt-oss-20b"];
+  let recherche = false;
+  for (let i = 0; i < candidats.length; i++) {
+    const model = candidats[i];
     const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${GROQ}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model, temperature: 0.3, max_tokens: max, messages: [{ role: "user", content: prompt }],
+        model, temperature: 0.3, max_tokens: max + 2000,
+        ...(model.includes("gpt-oss") ? { reasoning_effort: "low" } : {}),
+        messages: [{ role: "user", content: prompt }],
         ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
       }),
     });
-    if (r.ok) return (await r.json()).choices[0].message.content as string;
+    if (r.ok) {
+      const contenu = (await r.json()).choices?.[0]?.message?.content as string | undefined;
+      if (contenu) return contenu;
+      erreurs.push(`${model} : réponse vide`);
+    } else {
+      erreurs.push(`${model} : HTTP ${r.status} ${(await r.text()).slice(0, 150)}`);
+    }
+    if (i === candidats.length - 1 && !recherche) { // les deux modèles échouent : on cherche un modèle disponible
+      recherche = true;
+      try {
+        const m = await fetch("https://api.groq.com/openai/v1/models", { headers: { Authorization: `Bearer ${GROQ}` } });
+        const exclus = ["whisper", "orpheus", "guard", "safeguard", "tts", "allam", "embed", "playai", "compound"];
+        const taille = (id: string) => parseFloat(id.toLowerCase().match(/(\d+(?:\.\d+)?)b/)?.[1] ?? "0");
+        const autres = ((await m.json()).data ?? []).map((x: any) => x.id as string)
+          .filter((id: string) => !candidats.includes(id) && !exclus.some((x) => id.toLowerCase().includes(x)))
+          .sort((a: string, b: string) => taille(b) - taille(a)).slice(0, 3);
+        candidats.push(...autres);
+      } catch (_e) { /* on ignore */ }
+    }
   }
-  throw new Error("L'IA est indisponible (limite gratuite atteinte ?). Réessaie dans une minute.");
+  throw new Error("IA indisponible. " + erreurs.join(" || "));
 }
 function lireJson(s: string, secours: any) { try { return JSON.parse(s); } catch (_e) { return secours; } }
 
