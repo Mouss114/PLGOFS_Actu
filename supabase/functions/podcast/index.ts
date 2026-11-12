@@ -141,11 +141,24 @@ async function matiereDe(q: string): Promise<string> {
 }
 async function examenDebut(chat: number) {
   const depuis = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
-  const rows = await sb(`podcast_topics?date=gte.${depuis}&select=nom&order=date.desc&limit=40`);
-  const noms = [...new Set(rows.map((r: any) => r.nom as string))].sort(() => Math.random() - 0.5).slice(0, 3);
-  if (!noms.length) { await dire(chat, "Pas encore assez de podcasts en mémoire."); return; }
-  await dire(chat, "🎓 Examen blanc : 3 sujets tirés de ta semaine. Choisis-en un et prépare-toi 10 minutes. Puis réponds AU MESSAGE du sujet choisi (appui long > Répondre) avec un vocal de 3 à 5 minutes.");
-  for (const n of noms) await dire(chat, `🎓 EXAMEN BLANC — Sujet : ${n}`);
+  const rows = await sb(`podcast_topics?date=gte.${depuis}&select=nom,a_retenir&order=date.desc&limit=40`);
+  const vus = new Set<string>();
+  const uniques = rows.filter((r: any) => !vus.has(r.nom) && vus.add(r.nom)).sort(() => Math.random() - 0.5).slice(0, 3);
+  if (!uniques.length) { await dire(chat, "Pas encore assez de podcasts en mémoire."); return; }
+  let questions: string[] = uniques.map((r: any) => `Que faut-il retenir de « ${r.nom} » et quels en sont les enjeux ?`);
+  try {
+    const themes = uniques.map((r: any) => `- ${r.nom} : ${r.a_retenir ?? ""}`).join("\n");
+    const prompt = `Tu es un jury de grand oral de fin de scolarité (filière gestion-économie, option finance, domaine défense). À partir de chacun de ces thèmes d'actualité, écris UNE problématique : une question ouverte qui oblige à argumenter et à relier plusieurs notions (par exemple « Dans quelle mesure… », « En quoi… », « Comment concilier… »). Elle doit se comprendre sans connaître l'actualité du jour, tenir en une phrase de 30 mots maximum, et ne contenir aucun chiffre ni fait inventé.\n\nTHÈMES :\n${themes}\n\nRéponds uniquement en JSON : {"sujets":["problématique 1","problématique 2","problématique 3"]} (une par thème, dans le même ordre).`;
+    const data = lireJson(await llm(prompt, true, 700), {});
+    if (Array.isArray(data.sujets) && data.sujets.length >= uniques.length) questions = data.sujets.slice(0, uniques.length).map((x: unknown) => String(x));
+  } catch (_e) { /* on garde les questions de secours */ }
+  await dire(chat, "🎓 Examen blanc : 3 problématiques tirées de ta semaine. Choisis-en une et prépare-toi 10 minutes. Puis réponds AU MESSAGE de la problématique choisie (appui long > Répondre) avec un vocal de 3 à 5 minutes.\n\nBesoin d'un coup de pouce ? Réponds au message de la problématique par le mot « pistes » : tu recevras les notions à définir, un plan et les chiffres utiles.");
+  for (const q of questions) await dire(chat, `🎓 EXAMEN BLANC — Sujet : ${q}`);
+}
+async function examenPistes(chat: number, rep: string) {
+  const sujet = rep.split("Sujet :")[1]?.trim() ?? rep;
+  const prompt = `Un candidat au grand oral de fin de scolarité (filière gestion-économie, option finance, domaine défense) doit traiter cette problématique : « ${sujet} ». Aide-le à démarrer sans lui donner un exposé tout fait.\n\nMATIÈRE DE RÉFÉRENCE :\n${await matiereDe(sujet)}\n\nRéponds en français, en texte simple (sans markdown) :\n1) Ce que la question demande, reformulée en 2 phrases.\n2) Notions à définir (3 à 5, avec une définition d'une phrase chacune).\n3) Un plan en 2 ou 3 parties, avec l'idée de chaque partie.\n4) Chiffres ou faits utilisables, uniquement ceux de la matière de référence.\nN'invente aucun fait. Si la matière est insuffisante, dis-le.`;
+  await dire(chat, await llm(prompt, false, 1500));
 }
 async function examenRetour(chat: number, rep: string, expose: string, vocal: boolean) {
   const sujet = rep.split("Sujet :")[1]?.trim() ?? rep;
@@ -176,6 +189,7 @@ async function bot(u: any) {
     let saisie = texte;
     if (m.voice) { await dire(chat, "🎙️ Je transcris ton vocal…"); saisie = await transcrire(m.voice.file_id); }
     if (!saisie) return;
+    if (rep.startsWith("🎓 EXAMEN BLANC") && !m.voice && /^pistes?\b/i.test(saisie)) { await examenPistes(chat, rep); return; }
     if (rep.startsWith("🎓 EXAMEN BLANC")) { await examenRetour(chat, rep, saisie, !!m.voice); return; }
     if (rep.startsWith("❓ Question du jour")) { await questionRetour(chat, rep, saisie); return; }
     if (saisie.startsWith("/aide")) { await dire(chat, AIDE); return; }
