@@ -50,27 +50,49 @@ def groq_chat(prompt, system="", max_tokens=1500, json_mode=False, temperature=0
     messages = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}]
     derniere = None
     for modele in (config.MODELE_PRINCIPAL, config.MODELE_SECOURS):
+        marge = 600          # tokens réservés à la réflexion du modèle
+        sans_json = False
         for essai in range(4):
-            corps = {"model": modele, "messages": messages, "max_tokens": max_tokens, "temperature": temperature}
-            if json_mode:
+            corps = {"model": modele, "messages": messages, "max_tokens": max_tokens + marge,
+                     "temperature": temperature}
+            if "gpt-oss" in modele:
+                corps["reasoning_effort"] = "low"
+            if json_mode and not sans_json:
                 corps["response_format"] = {"type": "json_object"}
             try:
                 r = requests.post("https://api.groq.com/openai/v1/chat/completions",
                                   headers={"Authorization": "Bearer " + env("GROQ_API_KEY")}, json=corps, timeout=120)
-                if r.status_code == 429:
-                    try:
-                        attente = float(r.headers.get("retry-after", 30))
-                    except ValueError:
-                        attente = 30
-                    print(f"  limite Groq atteinte, pause de {attente:.0f}s")
-                    derniere = "429 (limite gratuite)"
-                    time.sleep(min(attente + 2, 90))
-                    continue
-                r.raise_for_status()
-                return r.json()["choices"][0]["message"]["content"]
-            except Exception as e:
+            except requests.RequestException as e:
                 derniere = e
                 time.sleep(5)
+                continue
+            if r.status_code == 429:
+                try:
+                    attente = float(r.headers.get("retry-after", 30))
+                except ValueError:
+                    attente = 30
+                print(f"  limite Groq atteinte, pause de {attente:.0f}s")
+                derniere = "429 (limite gratuite)"
+                time.sleep(min(attente + 2, 90))
+                continue
+            if r.status_code == 400 and json_mode and not sans_json:
+                print(f"  {modele} refuse le mode JSON, nouvel essai sans : {r.text[:150]}")
+                derniere = f"HTTP 400 {r.text[:150]}"
+                sans_json = True
+                continue
+            if r.status_code >= 500:
+                derniere = f"HTTP {r.status_code}"
+                time.sleep(5)
+                continue
+            if not r.ok:  # 400, 401, 404, 413... : inutile de réessayer, on passe au modèle suivant
+                derniere = f"HTTP {r.status_code} {r.text[:200]}"
+                break
+            choix = r.json()["choices"][0]
+            contenu = (choix["message"].get("content") or "").strip()
+            if contenu:
+                return contenu
+            derniere = f"réponse vide (finish_reason={choix.get('finish_reason')})"
+            marge += 1000    # la réflexion a tout consommé : on élargit le budget
         print(f"  modèle {modele} indisponible ({derniere}) -> modèle suivant")
     raise RuntimeError(f"Groq a échoué : {derniere}")
 
