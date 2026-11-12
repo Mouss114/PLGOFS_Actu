@@ -77,7 +77,7 @@ def pertinents(articles):
 def choisir_sujets(articles):
     liste = "\n".join(f"[{i}] ({a['source']}) {a['titre']}" for i, a in enumerate(articles))
     prompt = lib.fill(config.PROMPT_CHOIX, PERIMETRE=config.PERIMETRE, LISTE=liste, N=config.NB_SUJETS)
-    data = lib.parse_json(lib.groq_chat(prompt, json_mode=True, max_tokens=1200, temperature=0.2)) or {}
+    data = lib.parse_json(lib.groq_chat(prompt, json_mode=True, max_tokens=2000, temperature=0.2)) or {}
     sujets = []
     for s in data.get("sujets", []):
         ids = [i for i in s.get("ids", []) if isinstance(i, int) and 0 <= i < len(articles)]
