@@ -43,7 +43,7 @@ NB_SUJETS = 5            # nombre de sujets par podcast
 MOTS_SUJET = 550         # longueur d'un sujet normal (en mots)
 MOTS_APPROFONDI = 800    # longueur du sujet du jour
 FENETRE_HEURES = 48      # on ne garde que les articles des 48 dernières heures
-MAX_ARTICLES = 40        # nombre max de titres envoyés à l'IA (réduit pour tenir dans les limites gratuites)
+MAX_ARTICLES = 100        # nombre max de titres envoyés à l'IA (réduit pour tenir dans les limites gratuites)
 PAUSE = 60               # secondes entre deux appels IA (limite gratuite de Groq)
 
 # ---- Voix ----
