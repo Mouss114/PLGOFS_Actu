@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 """Mémoire Supabase. Sans les secrets SUPABASE_*, ce fichier ne fait rien (Phase 1)."""
 import datetime as dt, os
+from urllib.parse import urlparse
 import requests
 
-URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
+_p = urlparse(os.environ.get("SUPABASE_URL", "").strip())
+URL = f"{_p.scheme}://{_p.netloc}" if _p.scheme and _p.netloc else ""  # garde seulement https://xxxx.supabase.co
 CLE = os.environ.get("SUPABASE_SECRET_KEY", "").strip()
 
 
@@ -30,16 +32,20 @@ def _appel(methode, chemin, entetes=None, **kw):
 
 
 def inserer(table, lignes, conflit=None):
+    """Retourne True si tout a été enregistré."""
     if not lignes:
-        return
+        return True
     params = {"on_conflict": conflit} if conflit else None
     pref = "return=minimal" + (",resolution=ignore-duplicates" if conflit else "")
+    ok = True
     for i in range(0, len(lignes), 200):
-        _appel("POST", table, params=params, json=lignes[i:i + 200], entetes={"Prefer": pref})
+        r = _appel("POST", table, params=params, json=lignes[i:i + 200], entetes={"Prefer": pref})
+        ok = ok and r is not None
+    return ok
 
 
 def supprimer(table, colonne, valeur):
-    _appel("DELETE", table, params={colonne: "eq." + str(valeur)})
+    return _appel("DELETE", table, params={colonne: "eq." + str(valeur)}) is not None
 
 
 def sauver_articles(articles):
