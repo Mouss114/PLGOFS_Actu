@@ -74,6 +74,15 @@ const STYLE = "Style : puces courtes (une idée par ligne, 20 mots maximum), en 
 async function fiche(q: string, mode: string) {
   q = q.trim().slice(0, 200);
   if (!q) return { titre: "Question vide" };
+  if (mode === "references") {
+    const docs = await rpc("chercher_docs", { q, n: 10 });
+    if (!docs.length) return { titre: q, a_retenir: "Aucun passage trouvé dans la RNS et la LPM. Essaie d'autres mots-clés." };
+    const matiere = docs.map((d: any) => `- (${d.doc}, p. ${d.page}) ${d.content}`).join("\n");
+    const prompt = `Tu prépares une fiche de synthèse pour un candidat en préparation du grand oral de fin de scolarité (filière gestion-économie, option finance). Mot-clé : « ${q} ». Matière : extraits de la Revue nationale stratégique 2025 (RNS) et de la loi de programmation militaire 2024-2030 (LPM).\n${STYLE}\nRÈGLES : synthétise ce que disent les documents sur ce mot-clé, sans recopier les extraits. Indique le document et la page entre parenthèses pour chaque information (ex. (LPM, p. 12)). Ne mélange pas la RNS et la LPM sans le dire. Ignore les extraits qui parlent d'autre chose.\n\nEXTRAITS :\n${matiere}\n\nRéponds uniquement en JSON : {"titre":"","definition":["ce que recouvre le mot-clé, 2 à 3 puces"],"ce_que_disent_les_documents":["puces avec (document, page)"],"chiffres":["valeur — description (document, page)"],"enjeux":[],"a_retenir":"2 phrases","questions_liees":["3 à 5 questions"]}`;
+    const f = lireJson(await llm(prompt, true, 2000), { titre: q, a_retenir: "Réponse illisible, réessaie." });
+    f.extraits = docs.slice(0, 6).map((d: any) => ({ doc: d.doc, page: d.page, content: d.content }));
+    return f;
+  }
   if (mode === "sources") {
     const [arts, docs] = await Promise.all([rpc("chercher_articles", { q, n: 12 }), rpc("chercher_docs", { q, n: 4 })]);
     if (!arts.length && !docs.length) return { titre: q, a_retenir: "Rien trouvé dans les sources collectées. Essaie d'autres mots-clés." };
@@ -92,7 +101,7 @@ async function fiche(q: string, mode: string) {
 }
 
 const SECTIONS: [string, string][] = [
-  ["sujet", "LE SUJET"], ["definition", "DÉFINITION & CADRE"], ["situation", "SITUATION ACTUELLE"],
+  ["sujet", "LE SUJET"], ["definition", "DÉFINITION & CADRE"], ["ce_que_disent_les_documents", "CE QUE DISENT LES DOCUMENTS"], ["situation", "SITUATION ACTUELLE"],
   ["contexte_strategique", "CONTEXTE STRATÉGIQUE"], ["acteurs", "ACTEURS"], ["enjeux", "LES ENJEUX"],
   ["chiffres", "CHIFFRES CLÉS"], ["debat", "POINTS DE DÉBAT"], ["a_retenir", "À RETENIR"], ["questions_liees", "QUESTIONS LIÉES"],
 ];
@@ -201,7 +210,7 @@ Deno.serve(async (req: Request) => {
       case "carte": return json(await sb("podcast_topics?select=nom,domaine,date&order=date.desc&limit=1000"));
       case "glossaire": return json(await sb("glossaire?select=terme,definition,domaine&order=terme.asc&limit=1000"));
       case "docs": return json(await rpc("chercher_docs", { q: String(body.q ?? ""), n: 8 }));
-      case "fiche": return json(await fiche(String(body.q ?? ""), body.mode === "sources" ? "sources" : "podcasts"));
+      case "fiche": return json(await fiche(String(body.q ?? ""), body.mode === "sources" ? "sources" : body.mode === "references" ? "references" : "podcasts"));
       default: return json({ error: "action inconnue" }, 400);
     }
   } catch (e) {
