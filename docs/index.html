@@ -110,11 +110,16 @@ function ficheHtml(f) {
   box.append(h("button", { className: "btn noprint", textContent: "📄 Exporter en PDF", onclick: () => window.print() }));
   return box;
 }
+const LIBELLES = { podcasts: "Podcasts (ce que tu as entendu)", sources: "Sources (articles + documents)", references: "Références (RNS / LPM uniquement)" };
 async function chercher(q, mode) {
   q = (q || "").trim(); if (!q) return;
   onglet("recherche"); $("#q").value = q;
   const zone = vide($("#resultat")); zone.append(h("p", { className: "mut", textContent: "Je prépare la fiche…" }));
-  try { vide(zone).append(ficheHtml(await call("fiche", { q, mode }))); } catch (e) { erreur(zone, e); }
+  try {
+    const fiche = ficheHtml(await call("fiche", { q, mode }));
+    fiche.insertBefore(h("p", { className: "mut", textContent: "Mode utilisé : " + (LIBELLES[mode] || mode) + " (site v2)" }), fiche.children[1] || null);
+    vide(zone).append(fiche);
+  } catch (e) { erreur(zone, e); }
 }
 $("#bp").onclick = () => chercher($("#q").value, "podcasts");
 $("#bs").onclick = () => chercher($("#q").value, "sources");
@@ -189,7 +194,11 @@ $("#fg").addEventListener("input", afficherGlossaire);
 async function fichesRefs() {
   const q = $("#fr").value.trim(); if (!q) return;
   const zone = vide($("#lr")); zone.append(h("p", { className: "mut", textContent: "Je prépare la fiche…" }));
-  try { vide(zone).append(ficheHtml(await call("fiche", { q, mode: "references" }))); } catch (e) { erreur(zone, e); }
+  try {
+    const fiche = ficheHtml(await call("fiche", { q, mode: "references" }));
+    fiche.insertBefore(h("p", { className: "mut", textContent: "Mode utilisé : " + LIBELLES.references + " (site v2)" }), fiche.children[1] || null);
+    vide(zone).append(fiche);
+  } catch (e) { erreur(zone, e); }
 }
 $("#br").onclick = fichesRefs;
 $("#fr").addEventListener("keydown", (e) => { if (e.key === "Enter") fichesRefs(); });
