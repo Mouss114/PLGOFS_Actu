@@ -26,16 +26,26 @@ def main():
     fichiers = sorted(glob.glob("references/*.pdf"))
     if not fichiers:
         sys.exit("Aucun PDF dans le dossier references/.")
+    echecs = 0
     for chemin in fichiers:
         doc = os.path.basename(chemin)[:-4]
         print(f"Lecture de {doc} ...")
-        lignes = []
-        for no, page in enumerate(PdfReader(chemin).pages, 1):
-            texte = re.sub(r"\s+", " ", page.extract_text() or "").strip()
-            lignes += [{"doc": doc, "page": no, "content": m} for m in morceaux(texte)]
-        memory.supprimer("documents", "doc", doc)
-        memory.inserer("documents", lignes)
-        print(f"  {len(lignes)} passages enregistrés")
+        try:
+            lignes = []
+            for no, page in enumerate(PdfReader(chemin).pages, 1):
+                texte = re.sub(r"\s+", " ", page.extract_text() or "").strip()
+                lignes += [{"doc": doc, "page": no, "content": m} for m in morceaux(texte)]
+        except Exception as e:
+            print(f"  ÉCHEC de lecture : {e}")
+            echecs += 1
+            continue
+        if memory.supprimer("documents", "doc", doc) and memory.inserer("documents", lignes):
+            print(f"  {len(lignes)} passages enregistrés")
+        else:
+            print("  ÉCHEC : rien n'a été enregistré (vérifie SUPABASE_URL et SUPABASE_SECRET_KEY)")
+            echecs += 1
+    if echecs:
+        sys.exit(f"{echecs} document(s) en échec.")
 
 
 if __name__ == "__main__":
