@@ -89,12 +89,16 @@ def groq_chat(prompt, system="", max_tokens=1500, json_mode=False, temperature=0
                 break
             choix = r.json()["choices"][0]
             contenu = (choix["message"].get("content") or "").strip()
-            if contenu:
+            if contenu and choix.get("finish_reason") != "length":
                 return contenu
-            derniere = f"réponse vide (finish_reason={choix.get('finish_reason')})"
+            if contenu and marge >= 2600:  # déjà élargi : on garde la réponse même coupée
+                print("  (réponse peut-être tronquée)")
+                return contenu
+            derniere = f"réponse vide ou coupée (finish_reason={choix.get('finish_reason')})"
             marge += 1000    # la réflexion a tout consommé : on élargit le budget
         print(f"  modèle {modele} indisponible ({derniere}) -> modèle suivant")
     raise RuntimeError(f"Groq a échoué : {derniere}")
+
 
 # ---------------------------------------------------------------- Voix
 ATEMPO = 1.08  # vitesse de lecture appliquée par ffmpeg (1.0 = normal, 1.15 = plus rapide)

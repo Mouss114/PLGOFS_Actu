@@ -75,12 +75,19 @@ def pertinents(articles):
 
 # ------------------------------------------------------------ 2. Choix des sujets
 def choisir_sujets(articles):
-    liste = "\n".join(f"[{i}] ({a['source']}) {a['titre']}" for i, a in enumerate(articles))
+    liste = "\n".join(f"[{i}] ({a['source']}) {a['titre'][:110]}" for i, a in enumerate(articles))
     prompt = lib.fill(config.PROMPT_CHOIX, PERIMETRE=config.PERIMETRE, LISTE=liste, N=config.NB_SUJETS)
     data = lib.parse_json(lib.groq_chat(prompt, json_mode=True, max_tokens=2000, temperature=0.2)) or {}
     sujets = []
     for s in data.get("sujets", []):
-        ids = [i for i in s.get("ids", []) if isinstance(i, int) and 0 <= i < len(articles)]
+        ids = []
+        for i in (s.get("ids") or []):
+            try:
+                k = int(i)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= k < len(articles) and k not in ids:
+                ids.append(k)
         try:
             importance = int(s.get("importance", 3))
         except (TypeError, ValueError):
@@ -90,7 +97,14 @@ def choisir_sujets(articles):
     if not sujets:  # secours : un sujet par article
         sujets = [{"nom": a["titre"], "ids": [i], "importance": 3} for i, a in enumerate(articles[:config.NB_SUJETS])]
     sujets.sort(key=lambda s: -s["importance"])
-    return sujets[:config.NB_SUJETS]
+    sujets = sujets[:config.NB_SUJETS]
+    utilises = {i for s in sujets for i in s["ids"]}
+    for i, a in enumerate(articles):  # complète si l'IA a proposé trop peu de sujets
+        if len(sujets) >= config.NB_SUJETS:
+            break
+        if i not in utilises:
+            sujets.append({"nom": a["titre"], "ids": [i], "importance": 1})
+    return sujets
 
 
 # ------------------------------------------------------------ 3. Rédaction
@@ -111,13 +125,13 @@ def ecrire_sujet(sujet, articles, approfondi):
     for a in articles:
         corps = texte_article(a["lien"]) or a["resume"]
         extraits += f"- (publié le {a['date']:%d/%m/%Y}) {a['titre']}. {corps}\n"
-    refs = "".join(f"- ({p['doc']}, p. {p['page']}) {p['content']}\n" for p in memory.passages(sujet["nom"], 3))
-    prompt = lib.fill(config.PROMPT_SUJET, NOM=sujet["nom"], EXTRAITS=extraits[:7000], REFS=refs or "(aucun)",
+    refs = "".join(f"- ({p['doc']}, p. {p['page']}) {p['content']}\n" for p in memory.passages(sujet["nom"], 2))
+    prompt = lib.fill(config.PROMPT_SUJET, NOM=sujet["nom"], EXTRAITS=extraits[:5000], REFS=refs or "(aucun)",
                       MOTS=mots, MIN=mots - 60, MAX=mots + 60, TRANSITIONS=", ".join(config.TRANSITIONS),
                       DOMAINES=" | ".join(config.DOMAINES))
     data, sortie = None, ""
     for essai in range(2):
-        sortie = lib.groq_chat(prompt, system=config.SYSTEME, json_mode=True, max_tokens=3000)
+        sortie = lib.groq_chat(prompt, system=config.SYSTEME, json_mode=True, max_tokens=2600)
         data = lib.parse_json(sortie)
         if data and data.get("texte"):
             break
@@ -128,7 +142,9 @@ def ecrire_sujet(sujet, articles, approfondi):
             "domaine": str(data.get("domaine") or ""), "a_retenir": str(data.get("a_retenir") or ""),
             "chiffres": [str(c) for c in (data.get("chiffres") or [])][:5],
             "jury": {"question": str(jury.get("question") or ""), "reponse": str(jury.get("reponse") or "")},
-            "termes": [t for t in (data.get("termes") or []) if isinstance(t, dict)]}
+            "termes": [t for t in (data.get("termes") or []) if isinstance(t, dict)],
+            "anglicismes": {str(a["mot"]): str(a["prononciation"]) for a in (data.get("anglicismes") or [])
+                            if isinstance(a, dict) and a.get("mot") and a.get("prononciation")}}
 
 
 def assembler_script(blocs, jour):
@@ -148,29 +164,6 @@ def assembler_script(blocs, jour):
 
 
 # ------------------------------------------------------------ 4. Messages Telegram
-PRONONCIATION = {
-    "OTAN": "Otan", "EMIA": "É-M-I-A", "UE": "U-E", "PIB": "P-I-B",
-    "ONU": "Onu", "FAMAS": "Famas", "n°": "numéro",
-}
-
-
-def _nombre_compact(m):
-    return re.sub(r"[\s\u00a0\u202f]", "", m.group(0))
-
-
-def preparer_voix(texte):
-    """Nettoie le script pour la synthèse vocale (le fichier script.txt reste inchangé)."""
-    texte = texte.replace(" … Réponse possible", "\n\nRéponse possible")  # pause avant la réponse
-    for k, v in PRONONCIATION.items():
-        texte = re.sub(r"(?<!\w)%s(?!\w)" % re.escape(k), v, texte)
-    texte = texte.replace("M€", " millions d'euros").replace("Md€", " milliards d'euros")
-    texte = texte.replace("€", " euros").replace("%", " pour cent")
-    texte = re.sub(r"\([^)]*\)", "", texte)  # parenthèses
-    texte = re.sub(r"(?<!\d)\d{1,3}(?:[\s\u00a0\u202f]\d{3})+(?!\d)", _nombre_compact, texte)  # 1 200 000 -> 1200000
-    texte = texte.replace("…", ",").replace(" - ", ", ")
-    return re.sub(r"[ \t]{2,}", " ", texte)
-
-
 def resume(blocs, jour, minutes):
     lignes = [f"🎧 {lib.date_fr(jour)} — {minutes} min", ""]
     for i, b in enumerate(blocs, 1):
@@ -207,6 +200,7 @@ def main():
 
     print("2/5 Choix des sujets")
     sujets = choisir_sujets(choisis)
+    print(f"    {len(sujets)} sujet(s) retenu(s)")
 
     print("3/5 Rédaction")
     blocs = []
@@ -218,7 +212,10 @@ def main():
     print(f"    script : {len(script.split())} mots")
 
     print("4/5 Voix")
-    mp3, secondes = lib.texte_vers_mp3(preparer_voix(script), "/tmp/podcast.mp3")
+    prononciations = {}
+    for b in blocs:
+        prononciations.update(b["anglicismes"])
+    mp3, secondes = lib.texte_vers_mp3(script, "/tmp/podcast.mp3", prononciations)
     minutes = round(secondes / 60)
     with open("/tmp/script.txt", "w", encoding="utf-8") as f:
         f.write(script)
@@ -232,6 +229,9 @@ def main():
         lib.envoyer_document(chat, "/tmp/script.txt", f"script-{jour:%Y-%m-%d}.txt")
         if q:
             lib.envoyer_texte(chat, q)
+        if len(blocs) < 3 or len(articles) < 25:
+            lib.envoyer_texte(chat, f"⚠️ Podcast court : {len(articles)} articles et {len(blocs)} sujet(s) aujourd'hui. "
+                                    "Lance l'outil tester-sources pour vérifier les sources.")
     print("Terminé.")
 
 

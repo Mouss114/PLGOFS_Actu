@@ -10,9 +10,9 @@ def main():
         return
     matiere = "\n".join(
         f"- {l['date']} | {l['nom']} | {l['a_retenir']} | chiffres : {'; '.join(map(str, l.get('chiffres') or []))}"
-        for l in lignes)[:9000]
+        for l in lignes)[:6000]
     texte = lib.groq_chat(lib.fill(config.PROMPT_HEBDO, MATIERE=matiere), system=config.SYSTEME,
-                          max_tokens=2800, temperature=0.5)
+                          max_tokens=3500, temperature=0.5)
     mp3, secondes = lib.texte_vers_mp3(texte, "/tmp/hebdo.mp3")
     with open("/tmp/hebdo.txt", "w", encoding="utf-8") as f:
         f.write(texte)
