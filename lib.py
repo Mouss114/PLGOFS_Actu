@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 import requests
 import edge_tts
 import config
+from preparer import preparer_voix
 
 JOURS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
 MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"]
@@ -76,7 +77,11 @@ def groq_chat(prompt, system="", max_tokens=1500, json_mode=False, temperature=0
 
 # ---------------------------------------------------------------- Voix
 ATEMPO = 1.08  # vitesse de lecture appliquée par ffmpeg (1.0 = normal, 1.15 = plus rapide)
-VOIX_SECOURS = "fr-FR-HenriNeural"  # autre voix masculine, essayée si config.VOIX échoue
+# Voix de rechange si config.VOIX ne répond pas : toutes françaises de France, hommes d'abord, puis femme.
+VOIX_ALTERNATIVES = ["fr-FR-RemyMultilingualNeural", "fr-FR-HenriNeural", "fr-FR-DeniseNeural"]
+ATTENTES = (5, 15, 30, 60, 120)  # secondes d'attente entre les essais d'un même morceau
+PAUSE_ENTRE_MORCEAUX = 0.7       # secondes : évite de se faire refuser par le service gratuit
+VOIX_ROBOT = getattr(config, "VOIX_ROBOT", "non")  # "oui" dans config.py = accepte la voix robotique gTTS en dernier recours
 
 
 def decouper(texte, taille=2500):
@@ -101,21 +106,37 @@ def _silence(chemin, secondes):
 
 
 def _edge_segment(texte, chemin, candidates):
-    """Essaie chaque voix (2 essais chacune). Retourne la voix qui a fonctionné."""
+    """Essaie chaque voix, patiemment (6 essais, attentes croissantes). Retourne la voix qui a fonctionné."""
     for voix in candidates:
-        for essai in range(2):
+        for essai in range(len(ATTENTES) + 1):
             try:
                 asyncio.run(_edge(texte, voix, chemin))
                 if os.path.getsize(chemin) > 1000:
                     return voix
             except Exception as e:
                 print(f"  edge-tts ({voix}) essai {essai + 1} : {e}")
-                time.sleep(3)
+            if essai < len(ATTENTES):
+                time.sleep(ATTENTES[essai])
     raise RuntimeError("edge-tts n'a pas répondu")
 
 
-def texte_vers_mp3(texte, sortie):
-    """Texte -> MP3 avec pauses et volume normalisé. edge-tts, puis gTTS en secours. Retourne (chemin, secondes)."""
+def _signaler_echec(script):
+    """Aucune voix naturelle : on envoie le script texte et on prévient, sans audio robotique."""
+    try:
+        with open("/tmp/script.txt", "w", encoding="utf-8") as f:
+            f.write(script)
+        for chat in chat_ids():
+            envoyer_texte(chat, "🔇 La voix naturelle est indisponible ce matin (service Microsoft). "
+                                "Voici le script texte. Relance « Podcast du matin » (Run workflow) dans quelques minutes pour l'audio.")
+            envoyer_document(chat, "/tmp/script.txt", "script.txt")
+    except Exception as e:
+        print(f"  (envoi du script impossible : {e})")
+
+
+def texte_vers_mp3(texte, sortie, prononciations=None):
+    """Texte -> MP3 avec pauses et volume normalisé. edge-tts, voix de rechange, puis (si autorisé) gTTS. Retourne (chemin, secondes)."""
+    script = texte
+    texte = preparer_voix(texte, prononciations)  # années, chiffres, sigles et mots anglais
     # liste de (morceau de texte, pause après lui en secondes)
     morceaux = []
     for bloc in [b for b in texte.split("\n\n") if b.strip()]:
@@ -144,8 +165,9 @@ def texte_vers_mp3(texte, sortie):
             for i, (m, pause) in enumerate(morceaux):
                 f = f"{tmp}/seg_{i}.mp3"
                 if moteur == "edge-tts":
-                    candidates = [voix_ok[0]] if voix_ok[0] else list(dict.fromkeys([config.VOIX, VOIX_SECOURS]))
+                    candidates = [voix_ok[0]] if voix_ok[0] else list(dict.fromkeys([config.VOIX] + VOIX_ALTERNATIVES))
                     voix_ok[0] = _edge_segment(m, f, candidates)
+                    time.sleep(PAUSE_ENTRE_MORCEAUX)
                 else:
                     from gtts import gTTS
                     gTTS(m, lang="fr").save(f)
@@ -157,7 +179,10 @@ def texte_vers_mp3(texte, sortie):
             fichiers = synth("edge-tts")
             moteur = f"edge-tts, {voix_ok[0]}"
         except Exception as e:
-            print(f"  edge-tts indisponible ({e}) -> voix de secours gTTS")
+            print(f"  edge-tts indisponible ({e})")
+            if VOIX_ROBOT != "oui":
+                _signaler_echec(script)
+                raise RuntimeError("Voix naturelle indisponible (edge-tts)")
             moteur = "gtts"
             try:
                 prevenir("⚠️ Voix de secours gTTS utilisée aujourd'hui (edge-tts indisponible).")
