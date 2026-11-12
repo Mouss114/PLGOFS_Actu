@@ -41,19 +41,20 @@
     <div class="row">
       <button class="btn" id="bp">🎧 Podcasts</button>
       <button class="btn" id="bs">🔎 Sources</button>
+      <button class="btn" id="bd">📚 Réf.</button>
     </div>
     <div id="resultat"></div>
   </section>
   <section id="podcasts" hidden></section>
   <section id="carte" hidden></section>
   <section id="glossaire" hidden><input id="fg" placeholder="Filtrer les termes…"><div id="lg"></div></section>
-  <section id="refs" hidden><input id="fr" placeholder="Chercher dans la RNS 2025 / LPM 2024-2030…"><div id="lr"></div></section>
+  <section id="refs" hidden><input id="fr" placeholder="Fiche sur un mot-clé dans la RNS 2025 / LPM 2024-2030…"><div class="row"><button class="btn" id="br">📚 Faire la fiche</button></div><div id="lr"></div></section>
 </main>
 <script>
-const API = "https://xqyrxfromcztlisrxjti.supabase.co/functions/v1/podcast";
+const API = "COLLE_ICI_L_ADRESSE_DE_TA_FONCTION";
 // Doit être identique à DOMAINES dans config.py
 const DOMAINES = ["Économie & marchés","Politique monétaire","Fiscalité & budget","Entreprises","Géopolitique","Armées & opérations","BITD & innovation","Droit & éthique","Institutions"];
-const SECTIONS = [["sujet","Le sujet"],["definition","Définition & cadre"],["situation","Situation actuelle"],["contexte_strategique","Contexte stratégique"],["acteurs","Acteurs"],["enjeux","Les enjeux"],["chiffres","Chiffres clés"],["debat","Points de débat"],["a_retenir","À retenir"],["questions_liees","Questions liées"]];
+const SECTIONS = [["sujet","Le sujet"],["definition","Définition & cadre"],["ce_que_disent_les_documents","Ce que disent les documents"],["situation","Situation actuelle"],["contexte_strategique","Contexte stratégique"],["acteurs","Acteurs"],["enjeux","Les enjeux"],["chiffres","Chiffres clés"],["debat","Points de débat"],["a_retenir","À retenir"],["questions_liees","Questions liées"]];
 const ONGLETS = [["recherche","🔍 Recherche"],["podcasts","🎧 Derniers podcasts"],["carte","🗺️ Compétences"],["glossaire","📖 Glossaire"],["refs","📚 Références"]];
 const $ = (s) => document.querySelector(s);
 function h(tag, props, ...kids) { const e = document.createElement(tag); Object.assign(e, props || {}); kids.flat().forEach((k) => e.append(k)); return e; }
@@ -102,6 +103,10 @@ function ficheHtml(f) {
     box.append(h("h3", { textContent: "Sources" }));
     box.append(h("ul", {}, f.liens.map((l) => h("li", {}, h("a", { href: /^https?:/.test(l.link) ? l.link : "#", target: "_blank", rel: "noopener", textContent: l.source + " — " + l.title })))));
   }
+  if (f.extraits && f.extraits.length) {
+    box.append(h("h3", { textContent: "Extraits des documents" }));
+    f.extraits.forEach((x) => box.append(h("details", {}, h("summary", { textContent: x.doc + " — page " + x.page }), h("p", { className: "mut", textContent: x.content }))));
+  }
   box.append(h("button", { className: "btn noprint", textContent: "📄 Exporter en PDF", onclick: () => window.print() }));
   return box;
 }
@@ -113,6 +118,7 @@ async function chercher(q, mode) {
 }
 $("#bp").onclick = () => chercher($("#q").value, "podcasts");
 $("#bs").onclick = () => chercher($("#q").value, "sources");
+$("#bd").onclick = () => chercher($("#q").value, "references");
 $("#q").addEventListener("keydown", (e) => { if (e.key === "Enter") chercher($("#q").value, "podcasts"); });
 
 // ---------- Derniers podcasts
@@ -179,16 +185,14 @@ async function chargerGlossaire() {
 }
 $("#fg").addEventListener("input", afficherGlossaire);
 
-// ---------- Références (RNS / LPM)
-$("#fr").addEventListener("keydown", async (e) => {
-  if (e.key !== "Enter") return;
-  const zone = vide($("#lr"));
-  try {
-    const lignes = await call("docs", { q: $("#fr").value });
-    if (!lignes.length) zone.append(h("p", { className: "mut", textContent: "Aucun passage trouvé." }));
-    lignes.forEach((l) => zone.append(h("div", { className: "item" }, h("div", { className: "mut", textContent: l.doc + " — page " + l.page }), h("div", { textContent: l.content }))));
-  } catch (err) { erreur(zone, err); }
-});
+// ---------- Références (RNS / LPM) : fiche de synthèse
+async function fichesRefs() {
+  const q = $("#fr").value.trim(); if (!q) return;
+  const zone = vide($("#lr")); zone.append(h("p", { className: "mut", textContent: "Je prépare la fiche…" }));
+  try { vide(zone).append(ficheHtml(await call("fiche", { q, mode: "references" }))); } catch (e) { erreur(zone, e); }
+}
+$("#br").onclick = fichesRefs;
+$("#fr").addEventListener("keydown", (e) => { if (e.key === "Enter") fichesRefs(); });
 
 onglet("recherche");
 </script>
