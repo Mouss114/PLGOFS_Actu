@@ -45,11 +45,39 @@ def parse_json(texte):
 
 
 # ---------------------------------------------------------------- IA (Groq)
+_EXCLUS = ("whisper", "orpheus", "guard", "safeguard", "tts", "allam", "embed", "playai", "compound")
+_AUTO = []  # modèles trouvés automatiquement (une seule recherche par exécution)
+
+
+def modeles_auto(deja):
+    """Liste les modèles de texte de ton compte Groq, du plus gros au plus petit, sauf ceux déjà essayés."""
+    if not _AUTO:
+        try:
+            r = requests.get("https://api.groq.com/openai/v1/models",
+                             headers={"Authorization": "Bearer " + env("GROQ_API_KEY")}, timeout=30)
+            ids = [m["id"] for m in r.json().get("data", []) if m.get("active", True)]
+        except Exception as e:
+            print(f"  liste des modèles Groq indisponible ({e})")
+            ids = []
+
+        def taille(i):
+            m = re.search(r"(\d+(?:\.\d+)?)b", i.lower())
+            return float(m.group(1)) if m else 0.0
+        _AUTO.extend(sorted((i for i in ids if not any(x in i.lower() for x in _EXCLUS)), key=taille, reverse=True))
+    return [m for m in _AUTO if m not in deja][:3]
+
+
 def groq_chat(prompt, system="", max_tokens=1500, json_mode=False, temperature=0.4):
-    """Appelle Groq. Réessaie en cas de limite, puis bascule sur le modèle de secours."""
+    """Appelle Groq. Réessaie en cas de limite, bascule sur le modèle de secours,
+    puis, si les deux sont retirés, cherche tout seul un modèle disponible."""
     messages = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}]
     derniere = None
-    for modele in (config.MODELE_PRINCIPAL, config.MODELE_SECOURS):
+    candidats = [config.MODELE_PRINCIPAL, config.MODELE_SECOURS]
+    recherche_faite = False
+    i = 0
+    while i < len(candidats):
+        modele = candidats[i]
+        i += 1
         marge = 600          # tokens réservés à la réflexion du modèle
         sans_json = False
         for essai in range(4):
@@ -90,6 +118,8 @@ def groq_chat(prompt, system="", max_tokens=1500, json_mode=False, temperature=0
             choix = r.json()["choices"][0]
             contenu = (choix["message"].get("content") or "").strip()
             if contenu and choix.get("finish_reason") != "length":
+                if recherche_faite:
+                    _alerte_modele(modele)
                 return contenu
             if contenu and marge >= 2600:  # déjà élargi : on garde la réponse même coupée
                 print("  (réponse peut-être tronquée)")
@@ -97,7 +127,27 @@ def groq_chat(prompt, system="", max_tokens=1500, json_mode=False, temperature=0
             derniere = f"réponse vide ou coupée (finish_reason={choix.get('finish_reason')})"
             marge += 1000    # la réflexion a tout consommé : on élargit le budget
         print(f"  modèle {modele} indisponible ({derniere}) -> modèle suivant")
+        if i == len(candidats) and not recherche_faite and "401" not in str(derniere):
+            recherche_faite = True
+            nouveaux = modeles_auto(candidats)
+            print(f"  recherche automatique d'un modèle : {nouveaux or 'aucun trouvé'}")
+            candidats += nouveaux
     raise RuntimeError(f"Groq a échoué : {derniere}")
+
+
+_ALERTE = []
+
+
+def _alerte_modele(modele):
+    """Prévient une seule fois par exécution qu'un modèle de remplacement a servi."""
+    if _ALERTE:
+        return
+    _ALERTE.append(modele)
+    try:
+        prevenir(f"ℹ️ Modèles Groq de config.py indisponibles : « {modele} » a été choisi automatiquement. "
+                 f"Mets à jour MODELE_PRINCIPAL et MODELE_SECOURS dans config.py.")
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------- Voix
