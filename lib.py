@@ -96,7 +96,6 @@ def groq_chat(prompt, system="", max_tokens=1500, json_mode=False, temperature=0
         print(f"  modèle {modele} indisponible ({derniere}) -> modèle suivant")
     raise RuntimeError(f"Groq a échoué : {derniere}")
 
-
 # ---------------------------------------------------------------- Voix
 ATEMPO = 1.08  # vitesse de lecture appliquée par ffmpeg (1.0 = normal, 1.15 = plus rapide)
 # Voix de rechange si config.VOIX ne répond pas : toutes françaises de France, hommes d'abord, puis femme.
